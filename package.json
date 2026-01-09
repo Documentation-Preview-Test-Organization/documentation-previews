@@ -12,6 +12,10 @@
     "preview"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@octokit/app": "^13.0.0",
+    "@octokit/rest": "^20.0.0"
+  }
 }
 

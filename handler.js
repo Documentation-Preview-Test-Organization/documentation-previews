@@ -1,6 +1,8 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { App } = require('@octokit/app');
+const { Octokit } = require('@octokit/rest');
 
 // Load configuration
 const config = JSON.parse(fs.readFileSync('config.json', 'utf8'));
@@ -40,15 +42,43 @@ if (!config.monitoredRepositories.includes(repoName)) {
 
 console.log(`Processing PR #${prNumber} from ${repoFullName} (action: ${action})`);
 
-// Route by action
-if (action === 'opened' || action === 'synchronize') {
-  handlePreviewGeneration();
-} else if (action === 'closed' || action === 'merged') {
-  handleCleanup();
-} else {
-  console.log(`Action ${action} not handled. Skipping.`);
-  process.exit(0);
+// Helper function to get GitHub App installation token
+async function getInstallationToken() {
+  const appId = process.env.GITHUB_APP_ID || config.githubApp?.appId;
+  const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
+  const installationId = process.env.GITHUB_INSTALLATION_ID || config.githubApp?.installationId;
+
+  if (!appId || !privateKey || !installationId) {
+    throw new Error('GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, and GITHUB_INSTALLATION_ID must be set');
+  }
+
+  let formattedPrivateKey = privateKey.replace(/\\n/g, '\n');
+  if (!formattedPrivateKey.includes('\n') && formattedPrivateKey.includes('-----')) {
+    formattedPrivateKey = formattedPrivateKey.replace(/-----BEGIN/g, '\n-----BEGIN').replace(/-----END/g, '\n-----END').trim();
+  }
+
+  const app = new App({ appId: parseInt(appId), privateKey: formattedPrivateKey, Octokit });
+  const token = await app.getInstallationAccessToken({ installationId: parseInt(installationId) });
+  
+  return token;
 }
+
+// Route by action
+(async () => {
+  try {
+    if (action === 'opened' || action === 'synchronize') {
+      await handlePreviewGeneration();
+    } else if (action === 'closed' || action === 'merged') {
+      await handleCleanup();
+    } else {
+      console.log(`Action ${action} not handled. Skipping.`);
+      process.exit(0);
+    }
+  } catch (error) {
+    console.error('Error processing action:', error);
+    process.exit(1);
+  }
+})();
 
 async function handlePreviewGeneration() {
   try {
@@ -172,10 +202,7 @@ async function handlePreviewGeneration() {
 
     // Step 4: Clone preview repository
     console.log(`Cloning preview repository ${previewRepoOwner}/${previewRepoName}...`);
-    const previewToken = process.env.PREVIEW_REPO_TOKEN;
-    if (!previewToken) {
-      throw new Error('PREVIEW_REPO_TOKEN environment variable is required');
-    }
+    const previewToken = await getInstallationToken();
     execSync(`git clone https://${previewToken}@github.com/${previewRepoOwner}/${previewRepoName}.git ${previewDir}`, { stdio: 'inherit' });
     process.chdir(previewDir);
     
@@ -242,10 +269,7 @@ async function handleCleanup() {
 
     // Step 1: Clone preview repository
     console.log(`Cloning preview repository ${previewRepoOwner}/${previewRepoName}...`);
-    const previewToken = process.env.PREVIEW_REPO_TOKEN;
-    if (!previewToken) {
-      throw new Error('PREVIEW_REPO_TOKEN environment variable is required');
-    }
+    const previewToken = await getInstallationToken();
     execSync(`git clone https://${previewToken}@github.com/${previewRepoOwner}/${previewRepoName}.git ${previewDir}`, { stdio: 'inherit' });
     process.chdir(previewDir);
     
